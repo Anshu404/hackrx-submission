@@ -31,12 +31,10 @@ try:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
     # Load a free, high-quality embedding model from Hugging Face
-    # This model runs locally on your CPU.
     print("Loading SentenceTransformer model... (This may take a moment on first run)")
     embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
     print("Model loaded successfully.")
     
-    # IMPORTANT: The dimension of this model is 384
     EMBEDDING_DIMENSION = 384
 
 except Exception as e:
@@ -56,7 +54,7 @@ class HackRxResponse(BaseModel):
 app = FastAPI(
     title="HackRx 6.0 Intelligent Retrieval System (Groq Edition)",
     description="Processes documents to answer contextual questions using Groq and SentenceTransformers.",
-    version="1.1.0"
+    version="FINAL"
 )
 
 # --- Helper Functions for Core Logic ---
@@ -78,7 +76,7 @@ def process_and_index_document(doc_url: str) -> str:
     Downloads, processes, chunks, and indexes a PDF document into Pinecone.
     Returns the name of the Pinecone index created for this document.
     """
-    # 1. Download and Parse PDF
+    print("Starting document processing...")
     response = requests.get(doc_url)
     response.raise_for_status()
     
@@ -87,19 +85,17 @@ def process_and_index_document(doc_url: str) -> str:
         for page in doc:
             doc_text += page.get_text()
 
-    # 2. Chunk Text
     text_chunks = chunk_text(doc_text)
     if not text_chunks:
         raise ValueError("Document is empty or could not be processed.")
 
-    # 3. Create a unique index name
-    index_name = "hackrx-groq-" + hashlib.sha256(doc_url.encode()).hexdigest()[:12]
+    index_name = "hackrx-final-" + hashlib.sha256(doc_url.encode()).hexdigest()[:12]
 
-    # 4. Create Pinecone Index if it doesn't exist
     if index_name not in pc.list_indexes().names():
+        print(f"Creating new Pinecone index: {index_name}")
         pc.create_index(
             name=index_name,
-            dimension=EMBEDDING_DIMENSION,  # Use the correct dimension: 384
+            dimension=EMBEDDING_DIMENSION,
             metric='cosine',
             spec=ServerlessSpec(cloud='aws', region='us-east-1')
         )
@@ -107,14 +103,11 @@ def process_and_index_document(doc_url: str) -> str:
 
     index = pc.Index(index_name)
 
-    # 5. Generate Embeddings and Upsert to Pinecone
+    print("Embedding and upserting document chunks...")
     batch_size = 100
     for i in range(0, len(text_chunks), batch_size):
         batch_chunks = text_chunks[i:i + batch_size]
-        
-        # Create embeddings using SentenceTransformer model
         embeddings = embedding_model.encode(batch_chunks).tolist()
-
         vectors_to_upsert = []
         for j, chunk in enumerate(batch_chunks):
             vector_id = f"doc-chunk-{i+j}"
@@ -123,9 +116,8 @@ def process_and_index_document(doc_url: str) -> str:
                 "values": embeddings[j],
                 "metadata": {"text": chunk}
             })
-        
         index.upsert(vectors=vectors_to_upsert)
-
+    print("Document processing complete.")
     return index_name
 
 def execute_rag(index_name: str, question: str) -> str:
@@ -137,27 +129,54 @@ def execute_rag(index_name: str, question: str) -> str:
     # 1. Retrieve: Create embedding for the question and query Pinecone
     query_embedding = embedding_model.encode(question).tolist()
     
-    retrieval_results = index.query(vector=query_embedding, top_k=3, include_metadata=True)
+    # We use a higher top_k to ensure the right context is found
+    retrieval_results = index.query(vector=query_embedding, top_k=7, include_metadata=True)
     
+    # Check if any results were found
+    if not retrieval_results['matches']:
+        return "No relevant information was found in the document to answer this question."
+
     context = "\n---\n".join([match['metadata']['text'] for match in retrieval_results['matches']])
 
     # 2. Generate: Create a prompt and get answer from Groq
-    prompt = f"""
-    You are an expert at reading and interpreting policy documents. Answer the following question based *only* on the provided context.
-    If the context does not contain the answer, state that the information is not available in the provided text.
-    Your answer should be direct, concise, and extracted from the text.
+    # THIS IS THE KEY CHANGE! The new prompt asks for a summary.
+    # prompt = f"""
+    # You are an expert insurance analyst. Your task is to answer the user's question based *only* on the provided context.
+    # - Synthesize the information from the context into a clear and concise answer.
+    # - Do not just copy the text. Provide a helpful summary.
+    # - If the context does not contain the information to answer the question, state that the information is not available in the document.
 
-    Context:
+    # CONTEXT:
+    # {context}
+
+    # QUESTION:
+    # {question}
+
+    # ANSWER:
+    # """
+    # The new, better prompt
+    prompt = f"""
+    You are an expert insurance analyst. Your task is to answer the user's question based *only* on the provided context.
+    - Synthesize the information from the context into a clear and concise answer.
+    - Do not just copy the text. Provide a helpful summary.
+    - If the context does not contain the information to answer the question, state that the information is not available in the document.
+
+    CONTEXT:
     {context}
 
-    Question:
+    QUESTION:
     {question}
 
-    Answer:
+    ANSWER:
     """
     
+
+
+
+
+
     completion_response = groq_client.chat.completions.create(
-        model="llama3-8b-8192", # A great, fast model on Groq
+        model="llama3-8b-8192",
         messages=[
             {"role": "system", "content": "You are a helpful assistant specialized in document analysis."},
             {"role": "user", "content": prompt}
@@ -190,7 +209,7 @@ async def run_submission(
             answer = execute_rag(index_name, question)
             answers.append(answer)
             
-        # Optional: Clean up the created index
+        # Optional: Clean up the created index for hygiene
         # pc.delete_index(index_name)
 
         return HackRxResponse(answers=answers)
@@ -201,5 +220,3 @@ async def run_submission(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
-
-# To run: uvicorn main:app --reload
