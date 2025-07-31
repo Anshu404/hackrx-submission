@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+openai
+pinecone
+requests
+PyMuPDF
+python-dotenv
+groq
+sentence-transformers
