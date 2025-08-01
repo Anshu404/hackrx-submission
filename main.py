@@ -155,11 +155,29 @@ def execute_rag(index_name: str, question: str) -> str:
     # ANSWER:
     # """
     # The new, better prompt
+    # prompt = f"""
+    # You are an expert insurance analyst. Your task is to answer the user's question based *only* on the provided context.
+    # - Synthesize the information from the context into a clear and concise answer.
+    # - Do not just copy the text. Provide a helpful summary.
+    # - If the context does not contain the information to answer the question, state that the information is not available in the document.
+
+    # CONTEXT:
+    # {context}
+
+    # QUESTION:
+    # {question}
+
+    # ANSWER:
+    # """
+    
     prompt = f"""
-    You are an expert insurance analyst. Your task is to answer the user's question based *only* on the provided context.
-    - Synthesize the information from the context into a clear and concise answer.
-    - Do not just copy the text. Provide a helpful summary.
-    - If the context does not contain the information to answer the question, state that the information is not available in the document.
+    You are an expert insurance analyst tasked with answering questions by accurately summarizing only the provided context.
+
+    - Provide a clear, concise, and factually accurate answer based only on the context.
+    - Do not add any external knowledge or hallucinate information.
+    - Use bullet points if necessary for clarity.
+    - Keep the answer under 4 sentences unless the context demands more.
+    - If the answer is not available in the context, explicitly state: "Based on the provided document, this information is not available."
 
     CONTEXT:
     {context}
@@ -169,7 +187,22 @@ def execute_rag(index_name: str, question: str) -> str:
 
     ANSWER:
     """
+
+
+
+
+
     
+
+
+
+
+
+
+
+
+
+
 
 
 

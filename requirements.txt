@@ -1,9 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 fastapi
 uvicorn[standard]
-openai
+groq
+sentence-transformers
 pinecone
 requests
 PyMuPDF
 python-dotenv
-groq
-sentence-transformers
+
